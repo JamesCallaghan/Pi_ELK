@@ -1,0 +1,219 @@
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: elk-pv1
+  namespace: www
+  labels:
+    category: elk1
+spec:
+#  storageClassName: generic
+  capacity:
+    storage: 1Gi
+  nfs:
+    path: /mnt/NFS/elk/logstash/config
+    server: 192.168.1.29
+  accessModes:
+    - ReadWriteMany
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: elk-pvc1
+  namespace: www
+spec:
+#  storageClassName: generic
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 1Gi
+  selector:
+    matchLabels:
+      category: elk1
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: elk-pv2
+  namespace: www
+  labels:
+    category: elk2
+spec:
+#  storageClassName: generic
+  capacity:
+    storage: 1Gi
+  nfs:
+    path: /mnt/NFS/elk/kibana/config
+    server: 192.168.1.29
+  accessModes:
+    - ReadWriteMany
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: elk-pvc2
+  namespace: www
+spec:
+#  storageClassName: generic
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 1Gi
+  selector:
+    matchLabels:
+      category: elk2
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: elk-pv3
+  namespace: www
+  labels:
+    category: elk3
+spec:
+#  storageClassName: generic
+  capacity:
+    storage: 5Gi
+  nfs:
+    path: /mnt/NFS/elk/elasticsearch/data
+    server: 192.168.1.29
+  accessModes:
+    - ReadWriteMany
+#  mountOptions:
+#    - dir_mode=0777
+#    - file_mode=0777
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: elk-pvc3
+  namespace: www
+spec:
+#  storageClassName: generic
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 5Gi
+  selector:
+    matchLabels:
+      category: elk3
+---
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: elk
+  namespace: www
+spec:
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: elk
+    spec:
+#      securityContext:
+#        runAsUser: 999
+#        runAsGroup: 999
+      containers:
+      - name: elasticsearch
+        image: jamescallaghan1987/elastictest4
+#        image: ind3x/rpi-elasticsearch:latest
+#        command: ["elasticsearch"]
+#        args: ["-Des.network.host=\"0.0.0.0\""]
+        env:
+        - name: ES_HEAP_SIZE
+          value: "384m"
+        imagePullPolicy: IfNotPresent
+        ports:
+          - containerPort: 9200
+            protocol: TCP
+          - containerPort: 9300
+            protocol: TCP
+        securityContext:
+          runAsUser: 999
+          runAsGroup: 999
+#          fsGroup: 999
+          allowPrivilegeEscalation: true
+        volumeMounts:
+        - name: elasticsearch-data
+#          mountPath: /testing
+          mountPath: /usr/share/elasticsearch/data
+      - name: logstash
+        image: ind3x/rpi-logstash:latest
+        command: ["logstash"]
+        args: ["-f", "/etc/logstash/conf.d/logstash.conf"]
+        env:
+        - name: MALLOC_ARENA_MAX
+          value: "2"
+        imagePullPolicy: IfNotPresent
+        ports:
+          - containerPort: 5000
+            protocol: TCP
+          - containerPort: 5000
+            protocol: UDP
+        volumeMounts:
+        - name: logstash-conf
+          mountPath: /etc/logstash/conf.d
+      - name: kibana
+        image: jamescallaghan1987/kibana-arm2:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+          - containerPort: 5601
+            protocol: TCP
+        volumeMounts:
+        - name: kibana-conf
+          mountPath: /opt/kibana/config
+      initContainers:
+      - name: elasticsearch-data-permission-fix
+        image: hypriot/rpi-alpine
+        command: ["/bin/sh"]
+        args: ["-c", "chown -R 999:999 /data && chmod -R 0777 /data"]
+#        command: ["/bin/sh"]
+#        args: ["-c", "chmod -R 0777 /mnt/data"]
+#        command: ["/bin/sh"]
+#        args: ["-c", "chown -R 999:999 /mnt/data"]
+        volumeMounts:
+        - name: elasticsearch-data
+          mountPath: /data
+      volumes:
+      - name: logstash-conf
+        persistentVolumeClaim:
+          claimName: elk-pvc1
+      - name: kibana-conf
+        persistentVolumeClaim:
+          claimName: elk-pvc2
+      - name: elasticsearch-data
+        persistentVolumeClaim:
+          claimName: elk-pvc3
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: elk-svc
+  namespace: www
+  labels:
+    app: elk
+spec:
+  type: NodePort
+  externalIPs:
+    - 192.168.1.31
+  ports:
+  - port: 5000
+    name: logstash
+    protocol: TCP
+  - port: 5000
+    name: logstash-udp
+    protocol: UDP
+  - port: 9200
+    name: elasticsearch-http
+    protocol: TCP
+  - port: 9300
+    name: elasticsearch-tcp
+    protocol: TCP
+  - port: 5601
+    name: kibana
+    protocol: TCP
+  selector:
+    app: elk
